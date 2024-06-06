@@ -10,8 +10,8 @@ async function getPage(url) {
         const response = await axios.get(url);
         return response.data;
     } catch (error) {
-        console.error(`Error fetching page: ${url}`);
-        throw error;
+        console.error(`Error fetching page: ${url}`, error);
+        throw new Error('Failed to fetch Wikipedia page');
     }
 }
 
@@ -19,29 +19,38 @@ async function getFirstLink(html) {
     const $ = cheerio.load(html);
     const content = $('#mw-content-text').first();
     const firstLink = content.find('p > a').first();
-    return firstLink.attr('href');
+    return firstLink ? firstLink.attr('href') : null;
 }
 
 async function countRequestsToPhilosophy(url, visitedPages = [], requestCount = 0) {
-    const pageHtml = await getPage(url);
-    const firstLink = await getFirstLink(pageHtml);
+    try {
+        const pageHtml = await getPage(url);
+        const firstLink = await getFirstLink(pageHtml);
 
-    if (!firstLink) {
-        return { count: requestCount, visitedPages };
+        if (!firstLink) {
+            throw new Error('No valid links found on the page');
+        }
+
+        const nextPageUrl = `https://en.wikipedia.org${firstLink}`;
+        visitedPages.push(nextPageUrl);
+
+        if (firstLink === '/wiki/Philosophy') {
+            return { count: requestCount + 1, visitedPages };
+        }
+
+        return countRequestsToPhilosophy(nextPageUrl, visitedPages, requestCount + 1);
+    } catch (error) {
+        console.error(`Error counting requests: ${error.message}`);
+        throw error;
     }
-
-    const nextPageUrl = `https://en.wikipedia.org${firstLink}`;
-    visitedPages.push(nextPageUrl);
-
-    if (firstLink === '/wiki/Philosophy') {
-        return { count: requestCount + 1, visitedPages };
-    }
-
-    return countRequestsToPhilosophy(nextPageUrl, visitedPages, requestCount + 1);
 }
 
 app.get('/find-philosophy', async (req, res) => {
     const { url } = req.query;
+
+    if (!url) {
+        return res.status(400).json({ error: 'Missing URL parameter' });
+    }
 
     try {
         const { count, visitedPages } = await countRequestsToPhilosophy(url);
